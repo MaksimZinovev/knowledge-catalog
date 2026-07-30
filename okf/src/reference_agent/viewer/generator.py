@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 from dataclasses import dataclass, field
@@ -86,9 +87,67 @@ def _extract_links(body: str, doc_dir: Path, bundle_root: Path) -> list[str]:
     return out
 
 
+_SKIP_DIRS = {'.git', 'node_modules', '__pycache__', '.venv', 'venv', '.next', 'dist', 'build', 'out'}
+
+_CONFIG_NAME = "viz.config.json"
+
+
+def _load_config(root: Path) -> dict[str, Any]:
+    """Load viz.config.json from the bundle root. Returns {} if absent."""
+    config_path = root / _CONFIG_NAME
+    if not config_path.exists():
+        return {}
+    try:
+        return json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _load_ignore_patterns(root: Path) -> list[str]:
+    """Load ignore patterns from .gitignore in the bundle root."""
+    gitignore = root / ".gitignore"
+    if not gitignore.exists():
+        return []
+    patterns = []
+    for line in gitignore.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and not line.startswith("!"):
+            patterns.append(line)
+    return patterns
+
+
+def _is_ignored(rel_path: str, patterns: list[str]) -> bool:
+    """Check if a relative path matches any gitignore pattern."""
+    parts = rel_path.split("/")
+    name = parts[-1]
+    for pattern in patterns:
+        p = pattern.rstrip("/")
+        if not p:
+            continue
+        if p.startswith("**/"):
+            p = p[3:]
+        if p in parts[:-1]:
+            return True
+        if rel_path.startswith(p + "/"):
+            return True
+        if fnmatch.fnmatch(name, p) or fnmatch.fnmatch(name, pattern):
+            return True
+    return False
+
+
 def _walk_concepts(bundle_root: Path) -> list[Concept]:
+    config = _load_config(bundle_root)
+    use_gitignore = config.get("useGitignore", True)
+    extra_excludes = config.get("exclude", [])
+    ignore_patterns = _load_ignore_patterns(bundle_root) if use_gitignore else []
+    ignore_patterns += extra_excludes
     concepts: list[Concept] = []
     for md_path in sorted(bundle_root.rglob("*.md")):
+        rel = md_path.relative_to(bundle_root).as_posix()
+        if any(p in _SKIP_DIRS for p in md_path.parts):
+            continue
+        if _is_ignored(rel, ignore_patterns):
+            continue
         if md_path.name == _INDEX_NAME:
             continue
         rel = md_path.relative_to(bundle_root).with_suffix("")
@@ -196,7 +255,7 @@ def generate_visualization(
         .replace("/*__VIZ_CSS__*/", css)
         .replace("/*__VIZ_JS__*/", js)
         .replace("__BUNDLE_NAME__", json.dumps(name))
-        .replace("__BUNDLE_DATA__", json.dumps(graph, default=str))
+        .replace("__BUNDLE_DATA__", json.dumps(graph, default=str).replace("</", "<\\/"))
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
