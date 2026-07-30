@@ -167,6 +167,22 @@ the way the reference agent is a proof-of-concept *producer*. OKF
 bundles can be consumed by anything that reads markdown; this is just
 one shape.
 
+### Bundle filtering
+
+`visualize` skips files it shouldn't graph, in three layers:
+
+1. **Hardcoded noise dirs** — `.git`, `node_modules`, `__pycache__`, `.venv`, `venv`, `.next`, `dist`, `build`, `out`. Without this, a bundle with `node_modules` graphs hundreds of dependency README/CHANGELOG docs as concepts.
+2. **The bundle's `.gitignore`** — honored by default, so auto-generated or untracked files (skill projections, media, build artifacts) stay out. Disable with `"useGitignore": false`.
+3. **`viz.config.json` exclusions** — an optional file at the bundle root for explicit extra patterns:
+
+```json
+{ "useGitignore": true, "exclude": ["drafts/", "tmp/**"] }
+```
+
+Patterns match gitignore-style: `foo/` matches path prefixes, `*.pyc` matches filenames, `**/name` matches at any depth. A ready-to-copy example: [samples/viz.config.json](samples/viz.config.json).
+
+Why it matters: bundles in the wild live next to tooling artifacts, and concept docs may embed HTML (including `<script>`) in their markdown bodies — the generator escapes `</` in the embedded bundle JSON so the viewer never breaks parsing. See [VIZ-FILTERING.md](VIZ-FILTERING.md) for the full problem statement and e2e usage.
+
 ### What it shows
 
 - A **force-directed graph** of every concept in the bundle, with

@@ -1,0 +1,8 @@
+{
+  "useGitignore": true,
+  "exclude": [
+    "drafts/",
+    "tmp/**",
+    "**/wip*.md"
+  ]
+}
