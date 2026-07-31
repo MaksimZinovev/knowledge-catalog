@@ -366,9 +366,11 @@ def _replace_questions_block(text: str, entries: list | None) -> str:
             return text
         del lines[q_start:q_end]
         return sep.join(lines) + _tail_sep(text, sep)
-    block = yaml.safe_dump(
-        {"questions": entries}, sort_keys=False, allow_unicode=True
-    ).rstrip().split("\n")
+    block = (
+        yaml.safe_dump({"questions": entries}, sort_keys=False, allow_unicode=True)
+        .rstrip()
+        .split("\n")
+    )
     if q_start is None:
         lines[end:end] = block
     else:
@@ -448,7 +450,10 @@ def _generate_questions(args: argparse.Namespace) -> int:
         existing = doc.frontmatter.get("questions") or []
         # Skip already-generated files by default; --force regenerates
         # (e.g. note gained new sections since the last generation).
-        if any(isinstance(e, dict) and e.get("generated") for e in existing) and not args.force:
+        if (
+            any(isinstance(e, dict) and e.get("generated") for e in existing)
+            and not args.force
+        ):
             print(
                 f"generate-questions: skipping {path} (already generated; "
                 "--force to regenerate)",
@@ -473,7 +478,8 @@ def _generate_questions(args: argparse.Namespace) -> int:
             import json as _json
 
             candidates = _json.loads(
-                (resp.message.content or "").strip()
+                (resp.message.content or "")
+                .strip()
                 .removeprefix("```json")
                 .removesuffix("```")
                 .strip()

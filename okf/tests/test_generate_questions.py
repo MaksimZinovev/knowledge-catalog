@@ -152,7 +152,7 @@ def test_skip_already_generated_file_without_force(tmp_path: Path, monkeypatch, 
 
     note = _note(
         tmp_path,
-        'type: Reference\ntitle: T\nquestions:\n'
+        "type: Reference\ntitle: T\nquestions:\n"
         '  - {q: "Old?", generated: {by: cloud:x}}\n',
     )
     before = note.read_bytes()
