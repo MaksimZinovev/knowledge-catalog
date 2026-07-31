@@ -231,6 +231,8 @@ once at generation time and serialized into the file.
 
 ## Questions board
 
+![alt text](assets/questions-demo.jpg)
+
 The viewer has a second graph layer: the **Questions board**. Toggle
 with the header buttons (`1 Concepts` / `2 Questions`) or **Ctrl+1 /
 Ctrl+2**; the choice persists across reloads. Each question is an
