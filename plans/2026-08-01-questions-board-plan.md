@@ -53,14 +53,14 @@ match:
 
 Enumerated from `ls -1 ~/.pi/agent/skills/`, skill symlinks, MCP, and session CLIs (gh, git, graphjin, docfence):
 
-- ponytail (Skills): Yes — enforced: shortest diff, reuse rungs, ponytail ceiling comments
-- verification-before-completion (Skills): Yes — runnable check per non-trivial logic (extractor, dedupe, degraded mode)
-- brainstorming (Skills): No — design phase completed, spec approved
-- grilling (Skills): No — clarification rounds done; user phrasing recorded verbatim per docfence H3
-- docfence (CLI): Yes — scaffold + validate this plan; stamp only with user permission
-- gh (CLI): Yes — commit spec/plan and later PR flows on knowledge-catalog
-- deepwiki (MCP): Yes — confirm cytoscape multi-element-set idioms before writing the view swap
-- graphjin (CLI): Possibly — only if further star-mining for viewer idioms is requested
+- ponytail (Skills): Yes — shortest diff, reuse rungs
+- verification-before-completion (Skills): Yes — runnable check per non-trivial logic
+- brainstorming (Skills): No — design completed, spec approved
+- grilling (Skills): No — clarification rounds done; phrasing kept verbatim per H3
+- docfence (CLI): Yes — scaffold + validate plan; stamp only with permission
+- gh (CLI): Yes — commits and PR flows on knowledge-catalog
+- deepwiki (MCP): Yes — confirm cytoscape multi-element-set idioms before the swap
+- graphjin (CLI): Possibly — only if more star-mining is requested
 
 ## Approach
 
@@ -120,12 +120,12 @@ match:
   min_3_steps: '^- \[( |x)\]'
 ```
 
-- [x] Extract questions in `generator.py`: rule 1 frontmatter `questions:` (string + object forms), rule 2 `?` H2s with `source: "inferred"`; emit `BUNDLE.questions` with source metadata (Source: spec §1 Extraction; existing generator.py walk)
-- [x] Viewer swap in `viz.js`/`viz.html`: two element sets, header toggle + Ctrl+1/Ctrl+2, localStorage persistence, per-source node styles, disabled-toggle tooltip on empty bundle (Source: spec §1 Views/Styles; existing cytoscape single instance)
-- [x] Add `generate-questions` CLI in `cli.py`: `ollama` Client(host="<https://ollama.com>") with `OLLAMA_API_KEY` bearer, default model `deepseek-v4-flash`, probe-then-warn-exit-0 degradation, merge+dedupe write into frontmatter, `--file`/`--since`/`--confirm`/`--purge-generated`/`--require` flags, `generate_questions: false` escape hatch (Source: spec §2; ollama cloud docs)
-- [x] Frontmatter safe-write helper: edit only the `questions:` block, YAML validation on every write (Source: spec §3 validation requirement; Evidence Pack key risk)
-- [x] Build output line: `Wrote N concept(s), M edge(s), K question(s)` (Source: spec §1 Error handling)
-- [x] Commit; docfence stamp only after explicit user approval (Source: docfence H11 iron law)
+- [ ] Extract questions in `generator.py`: rule 1 frontmatter `questions:` (string + object forms), rule 2 `?` H2s as `source: "inferred"`; emit `BUNDLE.questions` (Source: spec §1; existing walk)
+- [ ] Viewer swap in `viz.js`/`viz.html`: two element sets, toggle + Ctrl+1/Ctrl+2, localStorage, per-source styles, disabled-toggle tooltip on empty bundle (Source: spec §1; one cytoscape instance)
+- [ ] `generate-questions` CLI in `cli.py`: `ollama` Client (host ollama.com) with `OLLAMA_API_KEY` bearer, default `deepseek-v4-flash`, probe-warn-exit-0, merge+dedupe frontmatter write, `--file`/`--since`/`--confirm`/`--purge-generated`/`--require`, `generate_questions: false` escape (Source: spec §2; ollama cloud docs)
+- [ ] Frontmatter safe-write helper: edit only `questions:` block, YAML validation each write (Source: spec §3; Evidence Pack risk)
+- [ ] Build line `Wrote N concept(s), M edge(s), K question(s)` (Source: spec §1)
+- [ ] Commit; docfence stamp only with user approval (Source: docfence H11)
 
 ## Files to Modify
 
@@ -236,6 +236,12 @@ OLLAMA_API_KEY= python -m reference_agent generate-questions --file notes/x.md; 
 ```
 
 ```bash
+# Test 4b: happy path — real generation via Ollama Cloud (requires OLLAMA_API_KEY; skip if unset)
+python -m reference_agent generate-questions --file C:\Users\maksi\repos\wiki\notes\pi-acp-ollama-connection-error.md --confirm
+# Expected: y/n/edit prompt per candidate; after approval frontmatter gains entries marked generated: {by: "cloud:deepseek-v4-flash"}; YAML validates; second run on the unchanged file proposes nothing; manual plain-string questions untouched
+```
+
+```bash
 # Test 5: boundary — dedupe collision between manual and generated text
 cd okf && python tests/test_generate_questions.py
 # Expected: manual plain-string survives; near-duplicate generated entry dropped; YAML validates (questions: is a list)
@@ -257,4 +263,4 @@ match:
   has_recommendation: 'Recommendation:'
 ```
 
-Per-step confidence: extractor 0.9, viewer swap 0.85 (cytoscape idiom check via deepwiki pending), CLI 0.9 (API confirmed from docs), frontmatter helper 0.8 (lowest outlier — formatting-preserving YAML edits are fiddly), build output 0.95, docfence flow 1.0. Average ~0.88. Key risk: pyyaml round-trip alters other frontmatter fields the publishing pipeline depends on — mitigated by editing only the `questions:` block plus a byte-diff fixture check. Gaps: node styling review, phase-2 hook repo choice. Recommendation: proceed with core viewer + D CLI now; E hook and F mining land as phase-2 follow-up after user verification of Test 3.
+Per-step confidence: extractor 0.9, viewer swap 0.85 (cytoscape idiom check pending), CLI 0.9 (API confirmed), frontmatter helper 0.8 (lowest outlier — YAML formatting edits fiddly), build 0.95, docfence 1.0. Average ~0.88. Key risk: pyyaml round-trip alters other frontmatter fields — mitigated by editing only `questions:` plus byte-diff fixture. Gaps: styling review, phase-2 hook repo. Recommendation: proceed with core viewer + D CLI; E hook and F mining as phase 2 after user verification of Test 3.
