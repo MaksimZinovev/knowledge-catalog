@@ -115,17 +115,19 @@
 			{
 				selector: 'node[kind = "question"][source = "inferred"]',
 				style: {
+					"background-color": "#0d9488",
 					"border-width": 2,
 					"border-style": "dashed",
-					"border-color": "#92400e",
+					"border-color": "#115e59",
 				},
 			},
 			{
 				selector: 'node[kind = "question"][source = "generated"]',
 				style: {
+					"background-color": "#8b5cf6",
 					"border-width": 2,
 					"border-style": "dashed",
-					"border-color": "#92400e",
+					"border-color": "#5b21b6",
 					width: 18,
 					height: 18,
 				},
@@ -136,7 +138,7 @@
 					"background-color": "#fff",
 					"border-width": 1,
 					"border-style": "dotted",
-					"border-color": "#92400e",
+					"border-color": "#64748b",
 				},
 			},
 			{

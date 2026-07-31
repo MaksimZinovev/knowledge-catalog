@@ -240,10 +240,10 @@ Style encodes where the question came from:
 
 | Source | Where it came from | Style |
 | --- | --- | --- |
-| `explicit` | hand-written `questions:` string | solid diamond |
-| `generated` | `generate-questions` CLI (LLM) | dashed border, small |
-| `stub` | TODO placeholder (`todo: true`) | thin dotted outline |
-| `inferred` | `## ...?` heading in the body | dashed border |
+| `explicit` | hand-written `questions:` string | solid amber diamond |
+| `generated` | `generate-questions` CLI (LLM) | violet diamond, dashed border, small |
+| `stub` | TODO placeholder (`todo: true`) | white diamond, gray dotted outline |
+| `inferred` | `## ...?` heading in the body | teal diamond, dashed border |
 
 A bundle with no questions disables the toggle (with an explaining
 tooltip) — never a blank graph.
