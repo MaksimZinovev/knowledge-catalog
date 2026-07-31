@@ -16,6 +16,7 @@ from reference_agent.bundle.document import (
 )
 
 _INDEX_NAME = "index.md"
+_QUESTION_H2_RE = re.compile(r"^##\s+(.+\?)\s*$", re.MULTILINE)
 _LINK_RE = re.compile(r"\]\(([^)\s]+\.md)(?:#[A-Za-z0-9_\-]*)?\)")
 _TYPE_PALETTE = {
     "BigQuery Dataset": "#8b5cf6",
@@ -79,15 +80,24 @@ def _extract_links(body: str, doc_dir: Path, bundle_root: Path) -> list[str]:
         except ValueError:
             continue
         rel = resolved.as_posix()
-        if rel.endswith(".md"):
-            rel = rel[:-3]
+        rel = rel.removesuffix(".md")
         if rel and rel not in seen:
             seen.add(rel)
             out.append(rel)
     return out
 
 
-_SKIP_DIRS = {'.git', 'node_modules', '__pycache__', '.venv', 'venv', '.next', 'dist', 'build', 'out'}
+_SKIP_DIRS = {
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".next",
+    "dist",
+    "build",
+    "out",
+}
 
 _CONFIG_NAME = "viz.config.json"
 
@@ -124,8 +134,7 @@ def _is_ignored(rel_path: str, patterns: list[str]) -> bool:
         p = pattern.rstrip("/")
         if not p:
             continue
-        if p.startswith("**/"):
-            p = p[3:]
+        p = p.removeprefix("**/")
         if p in parts[:-1]:
             return True
         if rel_path.startswith(p + "/"):
@@ -135,13 +144,14 @@ def _is_ignored(rel_path: str, patterns: list[str]) -> bool:
     return False
 
 
-def _walk_concepts(bundle_root: Path) -> list[Concept]:
+def _walk_concepts(bundle_root: Path) -> tuple[list[Concept], list[dict[str, Any]]]:
     config = _load_config(bundle_root)
     use_gitignore = config.get("useGitignore", True)
     extra_excludes = config.get("exclude", [])
     ignore_patterns = _load_ignore_patterns(bundle_root) if use_gitignore else []
     ignore_patterns += extra_excludes
     concepts: list[Concept] = []
+    questions: list[dict[str, Any]] = []
     for md_path in sorted(bundle_root.rglob("*.md")):
         rel = md_path.relative_to(bundle_root).as_posix()
         if any(p in _SKIP_DIRS for p in md_path.parts):
@@ -166,6 +176,7 @@ def _walk_concepts(bundle_root: Path) -> list[Concept]:
             sources = [sources]
         elif not isinstance(sources, list):
             sources = []
+        questions.extend(_extract_questions(fm, doc.body or "", concept_id))
         concept = Concept(
             id=concept_id,
             type=str(fm.get("type") or "Unknown"),
@@ -184,11 +195,70 @@ def _walk_concepts(bundle_root: Path) -> list[Concept]:
             links_to=_extract_links(doc.body or "", md_path.parent, bundle_root),
         )
         concepts.append(concept)
-    return concepts
+    return concepts, questions
 
 
-def _build_graph(concepts: list[Concept]) -> dict[str, Any]:
-    ids = {c.id for c in concepts}
+def _extract_questions(
+    fm: dict[str, Any], body: str, concept_id: str
+) -> list[dict[str, Any]]:
+    """Rule 1: frontmatter `questions:` (string + object forms).
+    Rule 2: `?` H2 headings -> source "inferred"."""
+    out: list[dict[str, Any]] = []
+    fm_questions = fm.get("questions")
+    if isinstance(fm_questions, list):
+        for entry in fm_questions:
+            if isinstance(entry, str):
+                out.append(_make_question(entry, "explicit", concept_id))
+            elif isinstance(entry, dict) and entry.get("q"):
+                if entry.get("generated"):
+                    source = "generated"
+                elif entry.get("todo"):
+                    source = "stub"
+                else:
+                    source = "explicit"
+                out.append(_make_question(str(entry["q"]), source, concept_id))
+    for m in _QUESTION_H2_RE.finditer(body):
+        out.append(_make_question(m.group(1).strip(), "inferred", concept_id))
+    return out
+
+
+def _make_question(text: str, source: str, concept_id: str) -> dict[str, Any]:
+    return {"text": text, "source": source, "answeredBy": [concept_id]}
+
+
+def _build_graph(
+    concepts: list[Concept], questions: list[dict[str, Any]]
+) -> dict[str, Any]:
+    concept_ids = {c.id for c in concepts}
+    question_nodes: list[dict[str, Any]] = []
+    question_edges: list[dict[str, Any]] = []
+    for i, q in enumerate(
+        [q for q in questions if any(a in concept_ids for a in q["answeredBy"])]
+    ):
+        qid = f"q:{q['answeredBy'][0]}:{i}"
+        question_nodes.append(
+            {
+                "data": {
+                    "id": qid,
+                    "label": q["text"],
+                    "kind": "question",
+                    "source": q["source"],
+                    "answeredBy": q["answeredBy"],
+                }
+            }
+        )
+        for answered_by in q["answeredBy"]:
+            if answered_by in concept_ids:
+                question_edges.append(
+                    {
+                        "data": {
+                            "id": f"{answered_by}__{qid}",
+                            "source": answered_by,
+                            "target": qid,
+                        }
+                    }
+                )
+    ids = concept_ids
     nodes = [c.to_node() for c in concepts]
     edges: list[dict[str, Any]] = []
     seen_edges: set[tuple[str, str]] = set()
@@ -200,13 +270,15 @@ def _build_graph(concepts: list[Concept]) -> dict[str, Any]:
             if key in seen_edges:
                 continue
             seen_edges.add(key)
-            edges.append({
-                "data": {
-                    "id": f"{c.id}__{target}",
-                    "source": c.id,
-                    "target": target,
+            edges.append(
+                {
+                    "data": {
+                        "id": f"{c.id}__{target}",
+                        "source": c.id,
+                        "target": target,
+                    }
                 }
-            })
+            )
     bodies = {c.id: c.body for c in concepts}
     types = sorted({c.type for c in concepts})
     return {
@@ -215,6 +287,7 @@ def _build_graph(concepts: list[Concept]) -> dict[str, Any]:
         "bodies": bodies,
         "types": types,
         "palette": _TYPE_PALETTE,
+        "questions": {"nodes": question_nodes, "edges": question_edges},
     }
 
 
@@ -243,19 +316,20 @@ def generate_visualization(
     if not bundle_root.is_dir():
         raise FileNotFoundError(f"Bundle directory not found: {bundle_root}")
 
-    concepts = _walk_concepts(bundle_root)
-    graph = _build_graph(concepts)
+    concepts, questions = _walk_concepts(bundle_root)
+    graph = _build_graph(concepts, questions)
     template = _load_template()
     css = _load_asset("viz.css")
     js = _load_asset("viz.js")
     name = bundle_name or bundle_root.resolve().name
 
     html = (
-        template
-        .replace("/*__VIZ_CSS__*/", css)
+        template.replace("/*__VIZ_CSS__*/", css)
         .replace("/*__VIZ_JS__*/", js)
         .replace("__BUNDLE_NAME__", json.dumps(name))
-        .replace("__BUNDLE_DATA__", json.dumps(graph, default=str).replace("</", "<\\/"))
+        .replace(
+            "__BUNDLE_DATA__", json.dumps(graph, default=str).replace("</", "<\\/")
+        )
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
@@ -263,5 +337,6 @@ def generate_visualization(
     return {
         "concepts": len(concepts),
         "edges": len(graph["edges"]),
+        "questions": len(graph["questions"]["nodes"]),
         "bytes": len(html.encode("utf-8")),
     }

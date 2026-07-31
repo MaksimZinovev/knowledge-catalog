@@ -1,4 +1,4 @@
-(function () {
+(() => {
   const bundle = window.BUNDLE;
   const bundleName = window.BUNDLE_NAME;
   document.title = `${bundleName} — OKF Viewer`;
@@ -24,9 +24,23 @@
   const nodeIndex = {};
   for (const n of bundle.nodes) nodeIndex[n.data.id] = n.data;
 
+  // Question index: answer lookups for the Questions board
+  const questionIndex = {};
+  for (const n of bundle.questions.nodes) questionIndex[n.data.id] = n.data;
+  const hasQuestions = bundle.questions.nodes.length > 0;
+
+  // View state: "concepts" (Ctrl+1) or "questions" (Ctrl+2), persisted
+  let currentView = localStorage.getItem("okf-view") || "concepts";
+  if (!hasQuestions) currentView = "concepts";
+
+  const initialElements = () =>
+    currentView === "questions"
+      ? [...bundle.nodes, ...bundle.nodes.length ? bundle.questions.nodes : [], ...bundle.questions.edges]
+      : [...bundle.nodes, ...bundle.edges];
+
   const cy = cytoscape({
     container: document.getElementById("graph"),
-    elements: [...bundle.nodes, ...bundle.edges],
+    elements: initialElements(),
     style: [
       {
         selector: "node",
@@ -86,6 +100,33 @@
         },
       },
       {
+        selector: 'node[kind = "question"]',
+        style: {
+          "shape": "diamond",
+          "background-color": "#f59e0b",
+          "width": 26,
+          "height": 26,
+        },
+      },
+      {
+        selector: 'node[kind = "question"][source = "inferred"]',
+        style: { "border-width": 2, "border-style": "dashed", "border-color": "#92400e" },
+      },
+      {
+        selector: 'node[kind = "question"][source = "generated"]',
+        style: {
+          "border-width": 2, "border-style": "dashed", "border-color": "#92400e",
+          "width": 18, "height": 18,
+        },
+      },
+      {
+        selector: 'node[kind = "question"][source = "stub"]',
+        style: {
+          "background-color": "#fff",
+          "border-width": 1, "border-style": "dotted", "border-color": "#92400e",
+        },
+      },
+      {
         selector: ".dim",
         style: { "opacity": 0.15 },
       },
@@ -94,7 +135,16 @@
     wheelSensitivity: 0.2,
   });
 
-  cy.on("tap", "node", (evt) => showDetail(evt.target.id()));
+  cy.on("tap", "node", (evt) => {
+    const id = evt.target.id();
+    const q = questionIndex[id];
+    if (q) {
+      const answeredBy = (q.answeredBy || []).find((a) => nodeIndex[a]);
+      if (answeredBy) showDetail(answeredBy, q.label);
+      return;
+    }
+    showDetail(id);
+  });
   cy.on("tap", (evt) => {
     if (evt.target === cy) clearSelection();
   });
@@ -102,6 +152,40 @@
   document.getElementById("layout").addEventListener("change", (e) => {
     cy.layout({ name: e.target.value, animate: false, padding: 30 }).run();
   });
+
+  // View toggle (Concepts / Questions board)
+  const btnConcepts = document.getElementById("view-concepts");
+  const btnQuestions = document.getElementById("view-questions");
+  if (!hasQuestions) {
+    btnQuestions.disabled = true;
+    btnQuestions.title = "No questions found (add `questions:` to frontmatter or end an H2 with `?`)";
+  }
+
+  function setView(view) {
+    if (view === currentView || (view === "questions" && !hasQuestions)) return;
+    currentView = view;
+    localStorage.setItem("okf-view", view);
+    cy.elements().remove();
+    cy.add(initialElements());
+    cy.layout({ name: document.getElementById("layout").value, animate: false, padding: 30 }).run();
+    clearSelection();
+    updateToggleButtons();
+  }
+
+  function updateToggleButtons() {
+    btnConcepts.classList.toggle("active", currentView === "concepts");
+    btnQuestions.classList.toggle("active", currentView === "questions");
+  }
+
+  btnConcepts.addEventListener("click", () => setView("concepts"));
+  btnQuestions.addEventListener("click", () => setView("questions"));
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && (e.key === "1" || e.key === "2")) {
+      e.preventDefault();
+      setView(e.key === "1" ? "concepts" : "questions");
+    }
+  });
+  updateToggleButtons();
 
   document.getElementById("reset").addEventListener("click", () => {
     cy.fit(null, 30);
@@ -149,12 +233,20 @@
     document.getElementById("detail-content").hidden = true;
   }
 
-  function showDetail(conceptId) {
+  function showDetail(conceptId, questionText) {
     const data = nodeIndex[conceptId];
     if (!data) return;
     cy.elements().unselect();
     const node = cy.getElementById(conceptId);
     if (node) node.select();
+
+    const pinned = document.getElementById("detail-question");
+    if (questionText) {
+      pinned.textContent = questionText;
+      pinned.hidden = false;
+    } else {
+      pinned.hidden = true;
+    }
 
     document.getElementById("detail-empty").hidden = true;
     const content = document.getElementById("detail-content");
@@ -275,8 +367,10 @@
       blSection.hidden = true;
     }
 
-    cy.animate({ center: { eles: node }, zoom: Math.max(cy.zoom(), 1.0) }, { duration: 200 });
+    cy.animate({ center: { eles: node, elesIncludeAncestors: false }, zoom: Math.max(cy.zoom(), 1.0) }, { duration: 200 });
   }
+
+  // Question board: clicking a question's answering note keeps the pinned question
 
   function makeBadge(text, cls) {
     const span = document.createElement("span");

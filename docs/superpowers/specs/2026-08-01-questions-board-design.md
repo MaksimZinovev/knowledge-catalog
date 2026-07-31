@@ -52,13 +52,13 @@ Each question gets: `id`, `text`, `source` (`explicit | inferred | stub | genera
 
 ### Styles by source (visual honesty)
 
-| source | style |
-| --- | --- |
-| explicit (manual string) | solid diamond |
-| inferred (`?` H2) | dashed border |
-| generated (LLM) | dashed border, small dot |
-| stub (TODO from hook) | thin outline |
-| git (phase 2) | solid, with provenance line in detail pane |
+| source                   | style                                      |
+| ------------------------ | ------------------------------------------ |
+| explicit (manual string) | solid diamond                              |
+| inferred (`?` H2)        | dashed border                              |
+| generated (LLM)          | dashed border, small dot                   |
+| stub (TODO from hook)    | thin outline                               |
+| git (phase 2)            | solid, with provenance line in detail pane |
 
 ### Error handling
 

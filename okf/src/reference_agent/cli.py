@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 from reference_agent.agent import DEFAULT_MODEL
+from reference_agent.bundle.document import OKFDocument, OKFDocumentError
 from reference_agent.bundle.paths import parse_concept_id
 from reference_agent.runner import ReferenceRunner
 from reference_agent.sources.bigquery import BigQuerySource
 
 _SOURCES = ("bq",)
+GQ_DEFAULT_MODEL = "deepseek-v4-flash"  # alternatives: nemotron-3-nano, gpt-oss
+_OLLAMA_CLOUD_HOST = "https://ollama.com"
 
 
 def _build_source(name: str, args: argparse.Namespace):
@@ -158,6 +163,19 @@ def _parser() -> argparse.ArgumentParser:
         "--name", default=None,
         help="Display name for the bundle (default: bundle directory name).",
     )
+
+    gq = sub.add_parser(
+        "generate-questions",
+        help="Suggest questions a note answers (Ollama Cloud) and write them "
+        "into the note's frontmatter `questions:` block.",
+    )
+    gq.add_argument("--bundle", type=Path, default=Path("."), help="Bundle root (for git discovery).")
+    gq.add_argument("--file", type=Path, default=None, help="Target a single markdown file.")
+    gq.add_argument("--since", default=None, help="Git ref: target .md files changed since this ref.")
+    gq.add_argument("--model", default=GQ_DEFAULT_MODEL)
+    gq.add_argument("--confirm", action="store_true", help="Ask y/n before each write.")
+    gq.add_argument("--require", action="store_true", help="Hard-fail when provider unavailable (CI).")
+    gq.add_argument("--purge-generated", action="store_true", help="Strip all generated entries from targets.")
     return p
 
 
@@ -180,10 +198,14 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"Wrote {stats['concepts']} concept(s), "
             f"{stats['edges']} edge(s), "
+            f"{stats['questions']} question(s), "
             f"{stats['bytes']} bytes → {out}",
             file=sys.stderr,
         )
         return 0
+
+    if args.command == "generate-questions":
+        return _generate_questions(args)
 
     if args.command == "enrich":
         source = _build_source(args.source, args)
@@ -213,3 +235,151 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Enriched {n} concept(s) into {args.out}{web_note}", file=sys.stderr)
         return 0
     return 1
+
+
+def _normalize_question(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _gq_target_files(args: argparse.Namespace) -> list[Path]:
+    if args.file:
+        return [args.file]
+    bundle = args.bundle.resolve()
+    if args.since:
+        out = subprocess.run(
+            ["git", "diff", "--name-only", args.since, "--", "*.md"],
+            cwd=bundle, capture_output=True, text=True,
+        ).stdout
+        return [bundle / line for line in out.splitlines() if line.strip()]
+    out = subprocess.run(
+        ["git", "status", "--porcelain", "--", "*.md"],
+        cwd=bundle, capture_output=True, text=True,
+    ).stdout
+    files = []
+    for line in out.splitlines():
+        path = line[3:].strip().split(" -> ")[-1].strip('"')
+        if path:
+            files.append(bundle / path)
+    return files
+
+
+def _merge_questions(fm: dict, new_texts: list[str], model: str) -> int:
+    """Merge new generated questions into fm['questions'], deduping against
+    manual (authoritative) text. Mutates fm. Returns count added."""
+    questions = fm.get("questions")
+    if not isinstance(questions, list):
+        questions = []
+    seen = {
+        _normalize_question(e if isinstance(e, str) else str(e.get("q", "")))
+        for e in questions
+    }
+    added = 0
+    for text in new_texts:
+        norm = _normalize_question(text)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        questions.append({"q": text, "generated": {"by": f"cloud:{model}"}})
+        added += 1
+    if questions:
+        fm["questions"] = questions
+    return added
+
+
+def _purge_generated(fm: dict) -> int:
+    questions = fm.get("questions")
+    if not isinstance(questions, list):
+        return 0
+    kept = [e for e in questions if not (isinstance(e, dict) and e.get("generated"))]
+    removed = len(questions) - len(kept)
+    if kept:
+        fm["questions"] = kept
+    else:
+        fm.pop("questions", None)
+    return removed
+
+
+def _generate_questions(args: argparse.Namespace) -> int:
+    files = [p for p in _gq_target_files(args) if p.suffix == ".md" and p.exists()]
+    if not files:
+        print("generate-questions: no target markdown files", file=sys.stderr)
+        return 0
+
+    docs: list[tuple[Path, OKFDocument]] = []
+    for path in files:
+        try:
+            docs.append((path, OKFDocument.parse(path.read_text(encoding="utf-8"))))
+        except (OKFDocumentError, OSError) as e:
+            print(f"generate-questions: skipping {path} ({e})", file=sys.stderr)
+
+    if args.purge_generated:
+        for path, doc in docs:
+            if _purge_generated(doc.frontmatter):
+                path.write_text(doc.serialize(), encoding="utf-8")
+                print(f"generate-questions: purged generated in {path}", file=sys.stderr)
+        return 0
+
+    import os
+    if not os.environ.get("OLLAMA_API_KEY"):
+        msg = "generate-questions: OLLAMA_API_KEY unset; provider unavailable (opt-out)"
+        if args.require:
+            raise SystemExit(msg)
+        print(msg, file=sys.stderr)
+        return 0
+
+    from ollama import Client
+    client = Client(
+        host=_OLLAMA_CLOUD_HOST,
+        headers={"Authorization": f"Bearer {os.environ['OLLAMA_API_KEY']}"},
+    )
+    try:
+        client.chat(
+            model=args.model,
+            messages=[{"role": "user", "content": "ping"}],
+            options={"num_predict": 1},
+        )
+    except Exception as e:
+        msg = f"generate-questions: provider unavailable ({e})"
+        if args.require:
+            raise SystemExit(msg) from e
+        print(msg, file=sys.stderr)
+        return 0
+
+    total = 0
+    for path, doc in docs:
+        if not doc.frontmatter.get("generate_questions", True):
+            continue
+        existing = doc.frontmatter.get("questions") or []
+        lines = [
+            e if isinstance(e, str) else str(e.get("q", ""))
+            for e in existing if isinstance(e, (str, dict))
+        ]
+        prompt = (
+            "Suggest up to 3 questions this document directly answers, phrased as "
+            "a reader would ask. Only add NON-duplicates of the existing questions "
+            "listed. Reply with a JSON array of strings only.\n\n"
+            f"Existing questions: {lines}\n\nDocument:\n{doc.body[:8000]}"
+        )
+        try:
+            resp = client.chat(
+                model=args.model, messages=[{"role": "user", "content": prompt}]
+            )
+            import json as _json
+            candidates = _json.loads(
+                resp.message.content.strip().removeprefix("```json").removesuffix("```").strip()
+            )
+            if not isinstance(candidates, list):
+                continue
+        except Exception as e:
+            print(f"generate-questions: failed for {path} ({e})", file=sys.stderr)
+            continue
+        new_texts = [str(x) for x in candidates]
+        if args.confirm:
+            new_texts = [t for t in new_texts if input(f"Add to {path}? {t!r} [y/N] ").lower() == "y"]
+        added = _merge_questions(doc.frontmatter, new_texts, args.model)
+        if added:
+            path.write_text(doc.serialize(), encoding="utf-8")
+            total += added
+            print(f"generate-questions: +{added} question(s) in {path}", file=sys.stderr)
+    print(f"generate-questions: wrote {total} question(s) across {len(docs)} file(s)", file=sys.stderr)
+    return 0

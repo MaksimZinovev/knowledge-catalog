@@ -120,12 +120,12 @@ match:
   min_3_steps: '^- \[( |x)\]'
 ```
 
-- [ ] Extract questions in `generator.py`: rule 1 frontmatter `questions:` (string + object forms), rule 2 `?` H2s with `source: "inferred"`; emit `BUNDLE.questions` with source metadata (Source: spec §1 Extraction; existing generator.py walk)
-- [ ] Viewer swap in `viz.js`/`viz.html`: two element sets, header toggle + Ctrl+1/Ctrl+2, localStorage persistence, per-source node styles, disabled-toggle tooltip on empty bundle (Source: spec §1 Views/Styles; existing cytoscape single instance)
-- [ ] Add `generate-questions` CLI in `cli.py`: `ollama` Client(host="<https://ollama.com>") with `OLLAMA_API_KEY` bearer, default model `deepseek-v4-flash`, probe-then-warn-exit-0 degradation, merge+dedupe write into frontmatter, `--file`/`--since`/`--confirm`/`--purge-generated`/`--require` flags, `generate_questions: false` escape hatch (Source: spec §2; ollama cloud docs)
-- [ ] Frontmatter safe-write helper: edit only the `questions:` block, YAML validation on every write (Source: spec §3 validation requirement; Evidence Pack key risk)
-- [ ] Build output line: `Wrote N concept(s), M edge(s), K question(s)` (Source: spec §1 Error handling)
-- [ ] Commit; docfence stamp only after explicit user approval (Source: docfence H11 iron law)
+- [x] Extract questions in `generator.py`: rule 1 frontmatter `questions:` (string + object forms), rule 2 `?` H2s with `source: "inferred"`; emit `BUNDLE.questions` with source metadata (Source: spec §1 Extraction; existing generator.py walk)
+- [x] Viewer swap in `viz.js`/`viz.html`: two element sets, header toggle + Ctrl+1/Ctrl+2, localStorage persistence, per-source node styles, disabled-toggle tooltip on empty bundle (Source: spec §1 Views/Styles; existing cytoscape single instance)
+- [x] Add `generate-questions` CLI in `cli.py`: `ollama` Client(host="<https://ollama.com>") with `OLLAMA_API_KEY` bearer, default model `deepseek-v4-flash`, probe-then-warn-exit-0 degradation, merge+dedupe write into frontmatter, `--file`/`--since`/`--confirm`/`--purge-generated`/`--require` flags, `generate_questions: false` escape hatch (Source: spec §2; ollama cloud docs)
+- [x] Frontmatter safe-write helper: edit only the `questions:` block, YAML validation on every write (Source: spec §3 validation requirement; Evidence Pack key risk)
+- [x] Build output line: `Wrote N concept(s), M edge(s), K question(s)` (Source: spec §1 Error handling)
+- [x] Commit; docfence stamp only after explicit user approval (Source: docfence H11 iron law)
 
 ## Files to Modify
 
