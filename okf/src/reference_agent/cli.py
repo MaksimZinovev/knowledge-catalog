@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+import yaml
+
 from reference_agent.agent import DEFAULT_MODEL
 from reference_agent.bundle.document import OKFDocument, OKFDocumentError
 from reference_agent.bundle.paths import parse_concept_id
@@ -75,8 +77,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     enrich.add_argument(
         "--billing-project",
-        help="Google Cloud project to bill for queries; "
-        "defaults to ADC default.",
+        help="Google Cloud project to bill for queries; defaults to ADC default.",
     )
     enrich.add_argument(
         "--out", required=True, type=Path, help="Bundle root directory."
@@ -85,8 +86,7 @@ def _parser() -> argparse.ArgumentParser:
         "--concept",
         action="append",
         default=None,
-        help="Enrich only this concept id (e.g. 'tables/events_'). "
-        "Repeatable.",
+        help="Enrich only this concept id (e.g. 'tables/events_'). Repeatable.",
     )
     enrich.add_argument(
         "--model",
@@ -152,15 +152,20 @@ def _parser() -> argparse.ArgumentParser:
         help="Generate a self-contained HTML graph view of an OKF bundle.",
     )
     viz.add_argument(
-        "--bundle", required=True, type=Path,
+        "--bundle",
+        required=True,
+        type=Path,
         help="Path to the bundle root directory.",
     )
     viz.add_argument(
-        "--out", type=Path, default=None,
+        "--out",
+        type=Path,
+        default=None,
         help="Output HTML path (default: <bundle>/viz.html).",
     )
     viz.add_argument(
-        "--name", default=None,
+        "--name",
+        default=None,
         help="Display name for the bundle (default: bundle directory name).",
     )
 
@@ -169,13 +174,38 @@ def _parser() -> argparse.ArgumentParser:
         help="Suggest questions a note answers (Ollama Cloud) and write them "
         "into the note's frontmatter `questions:` block.",
     )
-    gq.add_argument("--bundle", type=Path, default=Path("."), help="Bundle root (for git discovery).")
-    gq.add_argument("--file", type=Path, default=None, help="Target a single markdown file.")
-    gq.add_argument("--since", default=None, help="Git ref: target .md files changed since this ref.")
+    gq.add_argument(
+        "--bundle",
+        type=Path,
+        default=Path("."),
+        help="Bundle root (for git discovery).",
+    )
+    gq.add_argument(
+        "--file", type=Path, default=None, help="Target a single markdown file."
+    )
+    gq.add_argument(
+        "--since",
+        default=None,
+        help="Git ref: target .md files changed since this ref.",
+    )
     gq.add_argument("--model", default=GQ_DEFAULT_MODEL)
     gq.add_argument("--confirm", action="store_true", help="Ask y/n before each write.")
-    gq.add_argument("--require", action="store_true", help="Hard-fail when provider unavailable (CI).")
-    gq.add_argument("--purge-generated", action="store_true", help="Strip all generated entries from targets.")
+    gq.add_argument(
+        "--require",
+        action="store_true",
+        help="Hard-fail when provider unavailable (CI).",
+    )
+    gq.add_argument(
+        "--purge-generated",
+        action="store_true",
+        help="Strip all generated entries from targets.",
+    )
+    gq.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate even when the file already has generated entries "
+        "(e.g. note gained new sections since the last run).",
+    )
     return p
 
 
@@ -193,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "visualize":
         from reference_agent.viewer import generate_visualization
+
         out = args.out or (args.bundle / "viz.html")
         stats = generate_visualization(args.bundle, out, bundle_name=args.name)
         print(
@@ -227,11 +258,11 @@ def main(argv: list[str] | None = None) -> int:
             web_max_depth=args.web_max_depth,
             verbose=args.verbose,
         )
-        only = (
-            [parse_concept_id(c) for c in args.concept] if args.concept else None
-        )
+        only = [parse_concept_id(c) for c in args.concept] if args.concept else None
         n = runner.enrich_all(only=only)
-        web_note = f"; web pass used {len(seeds)} seed(s)" if seeds else "; web pass skipped"
+        web_note = (
+            f"; web pass used {len(seeds)} seed(s)" if seeds else "; web pass skipped"
+        )
         print(f"Enriched {n} concept(s) into {args.out}{web_note}", file=sys.stderr)
         return 0
     return 1
@@ -248,12 +279,16 @@ def _gq_target_files(args: argparse.Namespace) -> list[Path]:
     if args.since:
         out = subprocess.run(
             ["git", "diff", "--name-only", args.since, "--", "*.md"],
-            cwd=bundle, capture_output=True, text=True,
+            cwd=bundle,
+            capture_output=True,
+            text=True,
         ).stdout
         return [bundle / line for line in out.splitlines() if line.strip()]
     out = subprocess.run(
         ["git", "status", "--porcelain", "--", "*.md"],
-        cwd=bundle, capture_output=True, text=True,
+        cwd=bundle,
+        capture_output=True,
+        text=True,
     ).stdout
     files = []
     for line in out.splitlines():
@@ -286,17 +321,72 @@ def _merge_questions(fm: dict, new_texts: list[str], model: str) -> int:
     return added
 
 
-def _purge_generated(fm: dict) -> int:
+def _purge_generated(fm: dict) -> list:
+    """Strip generated entries. Returns remaining questions list."""
     questions = fm.get("questions")
     if not isinstance(questions, list):
-        return 0
+        return []
     kept = [e for e in questions if not (isinstance(e, dict) and e.get("generated"))]
-    removed = len(questions) - len(kept)
-    if kept:
-        fm["questions"] = kept
+    fm["questions"] = kept
+    return kept
+
+
+def _replace_questions_block(text: str, entries: list | None) -> str:
+    """Rewrite ONLY the `questions:` block of the frontmatter; every other byte
+    is untouched (byte-diff shows question changes and nothing else).
+
+    entries=None removes the block entirely."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        raise OKFDocumentError("No frontmatter block")
+    end = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end = i
+            break
+    if end is None:
+        raise OKFDocumentError("Unterminated YAML frontmatter block")
+    q_start = None
+    for i in range(1, end):
+        if lines[i].startswith("questions:"):
+            q_start = i
+            break
+    if q_start is not None:
+        q_end = q_start + 1
+        # Continuation lines: list items (`- `) and indented mappings.
+        while q_end < end and (
+            lines[q_end].startswith((" ", "\t", "-")) or not lines[q_end].strip()
+        ):
+            q_end += 1
     else:
-        fm.pop("questions", None)
-    return removed
+        q_end = None
+    sep = "\r\n" if "\r\n" in text else "\n"
+    if entries is None:
+        if q_start is None:
+            return text
+        del lines[q_start:q_end]
+        return sep.join(lines) + _tail_sep(text, sep)
+    block = yaml.safe_dump(
+        {"questions": entries}, sort_keys=False, allow_unicode=True
+    ).rstrip().split("\n")
+    if q_start is None:
+        lines[end:end] = block
+    else:
+        lines[q_start:q_end] = block
+    return sep.join(lines) + _tail_sep(text, sep)
+
+
+def _tail_sep(text: str, sep: str) -> str:
+    return sep if text.endswith(("\n", "\r")) else ""
+
+
+def _gq_parse(path: Path) -> tuple[str, OKFDocument] | None:
+    try:
+        text = path.read_bytes().decode("utf-8")
+        return text, OKFDocument.parse(text)
+    except (OKFDocumentError, OSError) as e:
+        print(f"generate-questions: skipping {path} ({e})", file=sys.stderr)
+        return None
 
 
 def _generate_questions(args: argparse.Namespace) -> int:
@@ -305,21 +395,26 @@ def _generate_questions(args: argparse.Namespace) -> int:
         print("generate-questions: no target markdown files", file=sys.stderr)
         return 0
 
-    docs: list[tuple[Path, OKFDocument]] = []
+    docs: list[tuple[Path, str, OKFDocument]] = []
     for path in files:
-        try:
-            docs.append((path, OKFDocument.parse(path.read_text(encoding="utf-8"))))
-        except (OKFDocumentError, OSError) as e:
-            print(f"generate-questions: skipping {path} ({e})", file=sys.stderr)
+        parsed = _gq_parse(path)
+        if parsed:
+            docs.append((path, parsed[0], parsed[1]))
 
     if args.purge_generated:
-        for path, doc in docs:
-            if _purge_generated(doc.frontmatter):
-                path.write_text(doc.serialize(), encoding="utf-8")
-                print(f"generate-questions: purged generated in {path}", file=sys.stderr)
+        for path, text, doc in docs:
+            kept = _purge_generated(doc.frontmatter)
+            # Only write when something was actually stripped.
+            out = _replace_questions_block(text, kept or None)
+            if out != text:
+                path.write_bytes(out.encode("utf-8"))
+                print(
+                    f"generate-questions: purged generated in {path}", file=sys.stderr
+                )
         return 0
 
     import os
+
     if not os.environ.get("OLLAMA_API_KEY"):
         msg = "generate-questions: OLLAMA_API_KEY unset; provider unavailable (opt-out)"
         if args.require:
@@ -328,6 +423,7 @@ def _generate_questions(args: argparse.Namespace) -> int:
         return 0
 
     from ollama import Client
+
     client = Client(
         host=_OLLAMA_CLOUD_HOST,
         headers={"Authorization": f"Bearer {os.environ['OLLAMA_API_KEY']}"},
@@ -346,13 +442,23 @@ def _generate_questions(args: argparse.Namespace) -> int:
         return 0
 
     total = 0
-    for path, doc in docs:
+    for path, text, doc in docs:
         if not doc.frontmatter.get("generate_questions", True):
             continue
         existing = doc.frontmatter.get("questions") or []
+        # Skip already-generated files by default; --force regenerates
+        # (e.g. note gained new sections since the last generation).
+        if any(isinstance(e, dict) and e.get("generated") for e in existing) and not args.force:
+            print(
+                f"generate-questions: skipping {path} (already generated; "
+                "--force to regenerate)",
+                file=sys.stderr,
+            )
+            continue
         lines = [
             e if isinstance(e, str) else str(e.get("q", ""))
-            for e in existing if isinstance(e, (str, dict))
+            for e in existing
+            if isinstance(e, (str, dict))
         ]
         prompt = (
             "Suggest up to 3 questions this document directly answers, phrased as "
@@ -365,8 +471,12 @@ def _generate_questions(args: argparse.Namespace) -> int:
                 model=args.model, messages=[{"role": "user", "content": prompt}]
             )
             import json as _json
+
             candidates = _json.loads(
-                resp.message.content.strip().removeprefix("```json").removesuffix("```").strip()
+                (resp.message.content or "").strip()
+                .removeprefix("```json")
+                .removesuffix("```")
+                .strip()
             )
             if not isinstance(candidates, list):
                 continue
@@ -375,11 +485,21 @@ def _generate_questions(args: argparse.Namespace) -> int:
             continue
         new_texts = [str(x) for x in candidates]
         if args.confirm:
-            new_texts = [t for t in new_texts if input(f"Add to {path}? {t!r} [y/N] ").lower() == "y"]
+            new_texts = [
+                t
+                for t in new_texts
+                if input(f"Add to {path}? {t!r} [y/N] ").lower() == "y"
+            ]
         added = _merge_questions(doc.frontmatter, new_texts, args.model)
         if added:
-            path.write_text(doc.serialize(), encoding="utf-8")
+            out = _replace_questions_block(text, list(doc.frontmatter["questions"]))
+            path.write_bytes(out.encode("utf-8"))
             total += added
-            print(f"generate-questions: +{added} question(s) in {path}", file=sys.stderr)
-    print(f"generate-questions: wrote {total} question(s) across {len(docs)} file(s)", file=sys.stderr)
+            print(
+                f"generate-questions: +{added} question(s) in {path}", file=sys.stderr
+            )
+    print(
+        f"generate-questions: wrote {total} question(s) across {len(docs)} file(s)",
+        file=sys.stderr,
+    )
     return 0
