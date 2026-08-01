@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import argparse
+import subprocess
 from pathlib import Path
 from textwrap import dedent
 
 from reference_agent.cli import (
+    _gq_target_files,
     _merge_questions,
     _normalize_question,
     _purge_generated,
@@ -245,3 +248,56 @@ questions:
     # Byte-diff minimal: only the questions: block lines changed
     assert after.split("questions:", 1)[0] == before.split("questions:", 1)[0]
     assert after.rstrip().endswith(before.rstrip().rsplit("---", 1)[1].rstrip())
+
+
+def test_purge_generated_end_to_end(tmp_path: Path):
+    """Minor #6: --purge-generated writes the file with generated entries stripped."""
+    note = _note(
+        tmp_path,
+        """type: Reference
+title: T
+questions:
+  - Manual stays.
+  - {q: Gen goes., generated: {by: cloud:x}}
+""",
+        body="# Body\nText.\n",
+    )
+    from reference_agent.bundle.document import OKFDocument
+
+    rc = main(["generate-questions", "--file", str(note), "--purge-generated"])
+    assert rc == 0
+    after = note.read_text(encoding="utf-8")
+    assert "Manual stays." in after and "Gen goes." not in after
+    doc = OKFDocument.parse(after)
+    assert doc.frontmatter["questions"] == ["Manual stays."]
+
+
+def test_gq_target_files_git_status(tmp_path: Path, monkeypatch):
+    """Minor #6: _gq_target_files parses `git status --porcelain` output."""
+    f1 = tmp_path / "a.md"
+    f2 = tmp_path / "b.md"
+    f1.write_text("# A\n", encoding="utf-8")
+    f2.write_text("# B\n", encoding="utf-8")
+
+    class FakeResult:
+        stdout = " M a.md\n?? b.md\n"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
+    args = argparse.Namespace(file=None, bundle=tmp_path, since=None)
+    files = _gq_target_files(args)
+    names = [p.name for p in files]
+    assert names == ["a.md", "b.md"]
+
+
+def test_gq_target_files_since_ref(tmp_path: Path, monkeypatch):
+    """Minor #6: _gq_target_files parses `git diff --name-only` with --since."""
+    f1 = tmp_path / "changed.md"
+    f1.write_text("# Changed\n", encoding="utf-8")
+
+    class FakeResult:
+        stdout = "changed.md\n"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeResult())
+    args = argparse.Namespace(file=None, bundle=tmp_path, since="main")
+    files = _gq_target_files(args)
+    assert len(files) == 1 and files[0].name == "changed.md"
