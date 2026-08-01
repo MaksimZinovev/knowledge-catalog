@@ -187,3 +187,59 @@ def test_v02_signals_appear_in_graph_payload(tmp_path: Path):
 def test_raises_when_bundle_missing(tmp_path: Path):
     with pytest.raises(FileNotFoundError):
         generate_visualization(tmp_path / "nope", tmp_path / "viz.html")
+
+
+def _make_question_bundle(root: Path, fm_block: str, body: str) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "note_a.md").write_text(
+        f"---\n{fm_block}\n---\n{body}", encoding="utf-8"
+    )
+
+
+def test_bundle_with_no_questions_yields_empty(tmp_path: Path):
+    bundle = tmp_path / "bundle"
+    _make_question_bundle(
+        bundle, "type: Reference\ntitle: Plain\n", "No questions here at all.\n"
+    )
+    stats = generate_visualization(bundle, tmp_path / "viz.html")
+    assert stats["questions"] == 0
+    data = _extract_bundle_data((tmp_path / "viz.html").read_text(encoding="utf-8"))
+    assert data["questions"] == {"nodes": [], "edges": []}
+
+
+def test_question_h2_inferred(tmp_path: Path):
+    bundle = tmp_path / "bundle"
+    _make_question_bundle(
+        bundle,
+        "type: Reference\ntitle: Add model\n",
+        "Steps.\n\n## Q — How do I add a new cloud model?\n\nEdit models.toml.\n",
+    )
+    stats = generate_visualization(bundle, tmp_path / "viz.html")
+    assert stats["questions"] == 1
+    data = _extract_bundle_data((tmp_path / "viz.html").read_text(encoding="utf-8"))
+    node = data["questions"]["nodes"][0]["data"]
+    assert node["source"] == "inferred"
+    assert node["label"].endswith("?")
+    assert node["answeredBy"] == ["note_a"]
+    edge = data["questions"]["edges"][0]["data"]
+    assert edge["source"] == "note_a" and edge["target"] == node["id"]
+
+
+def test_frontmatter_questions_mixed_sources(tmp_path: Path):
+    bundle = tmp_path / "bundle"
+    _make_question_bundle(
+        bundle,
+        """type: Reference
+title: Mixed
+questions:
+  - Why does the chat fail until Ollama runs?
+  - {q: "What do 'empty retries' mean?", generated: {by: 'cloud:deepseek-v4-flash'}}
+  - {q: "TODO: 'Entry fields — as a question?'", todo: true}
+""",
+        "Body.\n",
+    )
+    stats = generate_visualization(bundle, tmp_path / "viz.html")
+    assert stats["questions"] == 3
+    data = _extract_bundle_data((tmp_path / "viz.html").read_text(encoding="utf-8"))
+    sources = sorted(n["data"]["source"] for n in data["questions"]["nodes"])
+    assert sources == ["explicit", "generated", "stub"]

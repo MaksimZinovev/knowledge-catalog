@@ -229,6 +229,110 @@ The HTML embeds the bundle as a JSON blob and uses
 both loaded from a CDN. No data leaves the page; the bundle is parsed
 once at generation time and serialized into the file.
 
+## Questions board
+
+![alt text](assets/questions-demo.jpg)
+
+The viewer has a second graph layer: the **Questions board**. Toggle
+with the header buttons (`1 Concepts` / `2 Questions`) or **Ctrl+1 /
+Ctrl+2**; the choice persists across reloads. Each question is an
+amber diamond with an edge from the note that answers it; clicking a
+diamond opens that note's detail pane with the question pinned on top.
+Style encodes where the question came from:
+
+| Source | Where it came from | Style |
+| --- | --- | --- |
+| `explicit` | hand-written `questions:` string | solid amber diamond |
+| `generated` | `generate-questions` CLI (LLM) | violet diamond, dashed border, small |
+| `stub` | TODO placeholder (`todo: true`) | white diamond, gray dotted outline |
+| `inferred` | `## ...?` heading in the body | teal diamond, dashed border |
+
+A bundle with no questions disables the toggle (with an explaining
+tooltip) — never a blank graph.
+
+### Feeding the board with frontmatter
+
+The canonical source is a `questions:` list in the note's frontmatter.
+Three entry forms:
+
+```yaml
+questions:
+  - Why does the chat fail until Ollama is running?            # manual (explicit)
+  - {q: "What do 'empty retries' mean?", generated: {by: 'cloud:deepseek-v4-flash'}}  # generated
+  - {q: "TODO: 'Entry fields — as a question?'", todo: true}   # stub
+```
+
+Any `## Heading ending in ?` H2 in the body is also turned into an
+`inferred` node automatically — zero authoring effort.
+
+### Generating questions with Ollama Cloud
+
+`generate-questions` asks a cheap cloud model what questions a note
+answers and writes them into the note's frontmatter. It is a separate
+command — generation never happens inside `visualize`, which stays
+fast and offline.
+
+Setup: create a key at <https://ollama.com/settings/keys> and export it:
+
+```
+export OLLAMA_API_KEY=...
+```
+
+Generate for one file, approving each suggestion interactively:
+
+```
+.venv/bin/python -m reference_agent generate-questions \
+    --file notes/pi-acp-ollama-connection-error.md --confirm
+```
+
+Output:
+
+```
+Add to notes\pi-acp-...? 'Why does my Pi ACP chat return empty replies?' [y/N] y
+generate-questions: +3 question(s) in notes\pi-acp-...
+```
+
+This is the resulting diff — **only the `questions:` block is added,
+nothing else in the file changes**:
+
+```diff
++questions:
++- q: Why does my Pi ACP chat return empty replies and retry messages?
++  generated:
++    by: cloud:deepseek-v4-flash
+```
+
+Safety rails, built in by default:
+
+- **Idempotent**: a file that already has `generated:` entries is
+  skipped; the second identical run is a no-op.
+- **Manual questions win**: hand-written strings are never modified,
+  and near-exact duplicates of them are dropped before writing.
+- **Opt-out**: add `generate_questions: false` to a note's frontmatter
+  to exclude it permanently.
+- **Provider down = fine**: if `OLLAMA_API_KEY` is unset or the model
+  is unreachable, the command prints one warning line, exits 0, and
+  changes zero bytes (use `--require` to hard-fail in CI instead).
+
+More flags:
+
+| Flag | Description |
+| --- | --- |
+| `--file <md>` | Target a single file (default: all `.md` with uncommitted changes per `git status`) |
+| `--since <ref>` | Target `.md` files changed since a git ref |
+| `--model <tag>` | Default `deepseek-v4-flash`; alternatives `nemotron-3-nano`, `gpt-oss` |
+| `--confirm` | y/n prompt per candidate before writing |
+| `--force` | Regenerate a file that already has generated entries (e.g. the note gained new sections) |
+| `--purge-generated` | Strip all `generated:` entries for a clean regeneration |
+| `--require` | Exit non-zero when the provider is unavailable (CI) |
+
+Example — regenerate questions for everything changed in a feature
+branch:
+
+```
+.venv/bin/python -m reference_agent generate-questions --since main --force
+```
+
 ## Tests
 
 ```

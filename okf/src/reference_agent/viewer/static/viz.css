@@ -162,3 +162,25 @@ hr { border: none; border-top: 1px solid #e2e8f0; margin: 14px 0; }
 #detail-backlinks h2 { font-size: 13px; color: #64748b; margin-bottom: 6px; }
 #detail-backlinks ul { padding-left: 18px; }
 #detail-backlinks a { color: #2563eb; cursor: pointer; }
+
+/* Questions board (# view toggle) */
+.view-toggle { display: inline-flex; margin-right: 8px; }
+.view-toggle button {
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.view-toggle button:first-child { border-radius: 4px 0 0 4px; }
+.view-toggle button:last-child { border-radius: 0 4px 4px 0; border-left: none; }
+.view-toggle button.active { background: #0f172a; color: #fff; }
+.view-toggle button:disabled { opacity: 0.5; cursor: not-allowed; }
+.pinned-question {
+  background: #fffbeb;
+  border-left: 3px solid #f59e0b;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  font-style: italic;
+  border-radius: 0 4px 4px 0;
+}
