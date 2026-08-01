@@ -407,7 +407,14 @@ def _generate_questions(args: argparse.Namespace) -> int:
         for path, text, doc in docs:
             kept = _purge_generated(doc.frontmatter)
             # Only write when something was actually stripped.
-            out = _replace_questions_block(text, kept or None)
+            try:
+                out = _replace_questions_block(text, kept or None)
+            except OKFDocumentError:
+                print(
+                    f"generate-questions: skipping {path} (no frontmatter block)",
+                    file=sys.stderr,
+                )
+                continue
             if out != text:
                 path.write_bytes(out.encode("utf-8"))
                 print(
@@ -498,7 +505,16 @@ def _generate_questions(args: argparse.Namespace) -> int:
             ]
         added = _merge_questions(doc.frontmatter, new_texts, args.model)
         if added:
-            out = _replace_questions_block(text, list(doc.frontmatter["questions"]))
+            try:
+                out = _replace_questions_block(
+                    text, list(doc.frontmatter["questions"])
+                )
+            except OKFDocumentError:
+                print(
+                    f"generate-questions: skipping {path} (no frontmatter block)",
+                    file=sys.stderr,
+                )
+                continue
             path.write_bytes(out.encode("utf-8"))
             total += added
             print(

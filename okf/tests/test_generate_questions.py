@@ -176,6 +176,17 @@ def test_skip_already_generated_file_without_force(tmp_path: Path, monkeypatch, 
     assert note.read_bytes() == before  # skipped: second run is a no-op
 
 
+def test_no_frontmatter_file_skipped_not_crashed(tmp_path: Path, monkeypatch, capsys):
+    """Issue #1: a .md with no --- block should be skipped, not crash the batch."""
+    p = tmp_path / "plain.md"
+    p.write_bytes(b"# Just a note\nNo frontmatter here.\n")
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    rc = main(["generate-questions", "--file", str(p), "--purge-generated"])
+    assert rc == 0
+    assert p.read_bytes() == b"# Just a note\nNo frontmatter here.\n"
+    assert "no frontmatter" in capsys.readouterr().err.lower()
+
+
 def test_force_regenerates_and_byte_diff_is_minimal(tmp_path: Path, monkeypatch):
     import json as _json
 
