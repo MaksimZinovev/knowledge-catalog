@@ -353,10 +353,9 @@ def _replace_questions_block(text: str, entries: list | None) -> str:
             break
     if q_start is not None:
         q_end = q_start + 1
-        # Continuation lines: list items (`- `) and indented mappings.
-        while q_end < end and (
-            lines[q_end].startswith((" ", "\t", "-")) or not lines[q_end].strip()
-        ):
+        # Continuation lines: list items (`- `) and indented mappings only.
+        # Blank lines are NOT part of the block — they may separate keys.
+        while q_end < end and lines[q_end].startswith((" ", "\t", "-")):
             q_end += 1
     else:
         q_end = None
@@ -506,9 +505,7 @@ def _generate_questions(args: argparse.Namespace) -> int:
         added = _merge_questions(doc.frontmatter, new_texts, args.model)
         if added:
             try:
-                out = _replace_questions_block(
-                    text, list(doc.frontmatter["questions"])
-                )
+                out = _replace_questions_block(text, list(doc.frontmatter["questions"]))
             except OKFDocumentError:
                 print(
                     f"generate-questions: skipping {path} (no frontmatter block)",

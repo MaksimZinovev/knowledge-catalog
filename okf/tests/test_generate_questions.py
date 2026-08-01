@@ -123,6 +123,26 @@ def test_replace_questions_block_is_minimal_diff(tmp_path: Path):
     assert "\nquestions:\n" in out
 
 
+def test_replace_questions_block_preserves_blank_line_before_next_key():
+    """Issue #2: blank line separating questions: from next key must survive."""
+    from reference_agent.cli import _replace_questions_block
+
+    original = dedent("""\
+        ---
+        questions:
+          - Old one?
+
+        type: note
+        ---
+        Body.
+        """)
+    new = [{"q": "New?", "generated": {"by": "cloud:y"}}]
+    out = _replace_questions_block(original, new)
+    # The blank line between the block and `type: note` must still be there
+    assert "\ntype: note\n---\nBody." in out
+    assert "Old one?" not in out and "New?" in out
+
+
 def test_replace_questions_block_replaces_and_removes():
     from reference_agent.cli import _replace_questions_block
 
