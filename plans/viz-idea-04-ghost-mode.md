@@ -1,0 +1,3 @@
+# Idea 4 (quick win, tail sampling) — "Ghost mode": fade unread nodes instead of showing everything bright (p < 0.10)
+
+The viewer ships with zero concept of *what you've actually read*. Persist a `visited` set in localStorage (no server needed — the static-file architecture survives). Nodes you've never opened render at 35% opacity with a hollow outline; visited nodes are fully solid with a small check-tick on the label. One visual rule, zero new controls, near-zero cognitive load — turns the graph from "map of things" into "map of my progress." A `Ctrl+Shift+R` resets memory. Bonus for visual learners: unexplored territory literally *looks* like fog of war in a game map.
